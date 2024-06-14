@@ -1,0 +1,18 @@
+# Node.js (WASM) project
+frontend_rust/node_modules/
+frontend_rust/.env
+frontend_rust/target/
+
+# Rust project
+backend_rust/Cargo.lock
+backend_rust/target
+
+# Python project
+backend_python/__pycache__/
+backend_python/*.pyc
+backend_python/.venv
+backend_python/.env
+
+# General
+*.log
+.DS_Store
