@@ -12,6 +12,7 @@ uvicorn = "^0.30.1"
 gymnasium = {extras = ["all"], version = "^0.29.1"}
 pydantic = "^2.7.3"
 numpy = "^1.26.4"
+msgpack = "^1.0.8"
 
 
 

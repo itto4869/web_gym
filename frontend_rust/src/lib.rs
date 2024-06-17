@@ -6,6 +6,8 @@ use wasm_bindgen_futures::spawn_local;
 use wasm_bindgen::Clamped;
 use flate2::read::GzDecoder;
 use std::io::Read;
+use rmp_serde::decode::from_slice;
+use js_sys;
 
 #[derive(Serialize)]
 struct InputData {
@@ -26,6 +28,8 @@ struct ConvertData {
 
 async fn send_post_request(input_value: i32, ctx: CanvasRenderingContext2d) -> Result<(), reqwest::Error> {
     const PYTHON_HOST: &str = "http://127.0.0.1:8000";
+    const width: u32 = 600;
+    const height: u32 = 400;
 
     ctx.clear_rect(0.0, 0.0, 600.0, 400.0);
 
@@ -36,7 +40,7 @@ async fn send_post_request(input_value: i32, ctx: CanvasRenderingContext2d) -> R
     let performance = window.performance().unwrap();
     let start = performance.now();
 
-    let response = client.post(&format!("{}/api/", PYTHON_HOST))
+    let response = client.post(&format!("{}/render", PYTHON_HOST))
         .json(&input_data)
         .send()
         .await?;
@@ -46,15 +50,19 @@ async fn send_post_request(input_value: i32, ctx: CanvasRenderingContext2d) -> R
         return Err(reqwest::Error::from(response.error_for_status().unwrap_err()));
     }
 
-    let data = response.json::<ConvertData>().await?;
+    let elapsed_request = performance.now() - start;
 
-    let elapsed_convert = performance.now() - start;
+    let data = response.bytes().await?;
+    let elapsed_convert_bytes = performance.now() - start - elapsed_request;
 
-    let image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&data.data), data.width as u32, data.height as u32).unwrap();
+    let elapsed_convert = performance.now() - start - elapsed_request - elapsed_convert_bytes;
+
+    let image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&data), width, height).unwrap();
     ctx.put_image_data(&image_data, 0.0, 0.0).unwrap();
-    let elapsed_draw = performance.now() - start - elapsed_convert;
+    let elapsed_draw = performance.now() - start - elapsed_request - elapsed_convert;
     let elapsed_total = performance.now() - start;
-    web_sys::console::log_1(&JsValue::from_str(&format!("Convert: {:?}, Draw: {:?}, Total: {:?}", elapsed_convert, elapsed_draw, elapsed_total)));
+    web_sys::console::log_1(&JsValue::from_str(&format!("Request: {:?}, Convert b: {:?}, Convert: {:?}, Draw: {:?}, Total: {:?}",
+        elapsed_request, elapsed_convert_bytes, elapsed_convert, elapsed_draw, elapsed_total)));
     Ok(())
 }
 

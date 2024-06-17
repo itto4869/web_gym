@@ -7,6 +7,11 @@ import numpy as np
 import gzip
 import requests
 import time
+import msgpack
+import io
+from numpy.typing import NDArray
+from PIL import Image
+
 
 app = FastAPI()
 rust_host = "http://127.0.0.1:5000"
@@ -34,8 +39,12 @@ class ConvertData(BaseModel):
     width: int
     height: int
 
-def square(input: int) -> int:
-    return input * input
+def rgb_to_rgba(rgb_array: NDArray):
+    # Convert RGB to RGBA
+    a_array = np.full((rgb_array.shape[0], rgb_array.shape[1], 1), 255, dtype=np.uint8)
+    rgba_array = np.concatenate([rgb_array, a_array], axis=2)
+    rgba_array = rgba_array.reshape(-1)
+    return rgba_array
 
 @app.get("/")
 def read_root():
@@ -45,11 +54,11 @@ def read_root():
 def read_item(item_id: int, q: str | None = None):
     return {"item_id": item_id, "q": q}
 
-@app.post("/api/")
+@app.post("/api")
 def read_rust_send(data: InputData): # TODO: fastapiの非同期通信とrustの並列化，websocketを使って高速化
     output = env.render()
     output = np.array(output, dtype=np.uint8)
-    output = output.tolist() # type: ignore
+    output = output.tolist()
     start_time = time.time()
     response = requests.post(f"{rust_host}/convert", json={"data": output})
     end_time = time.time()
@@ -60,7 +69,16 @@ def read_rust_send(data: InputData): # TODO: fastapiの非同期通信とrustの
     
     convert_data = response.json()
     return ConvertData(**convert_data)
-    
+
+@app.post("/render")
+async def post_rgba(data: InputData):
+    rgb = env.render()
+    rgb = np.array(rgb, dtype=np.uint8)
+    width = rgb.shape[1]
+    height = rgb.shape[0]
+    rgba = rgb_to_rgba(rgb)
+    rgba = rgba.reshape(600, 400, 4)
+    return Response(content=rgba.tobytes(), media_type="application/octet-stream")
 
 if __name__ == "__main__":
     import uvicorn
