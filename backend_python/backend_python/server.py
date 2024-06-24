@@ -16,8 +16,7 @@ from PIL import Image
 app = FastAPI()
 rust_host = "http://127.0.0.1:5000"
 
-env = gymnasium.make('CartPole-v0', render_mode="rgb_array")
-observation, info = env.reset(seed=42)
+env = None
 
 # CORSの設定
 app.add_middleware(
@@ -31,13 +30,15 @@ app.add_middleware(
 class InputData(BaseModel):
     input: int
 
+class InitData(BaseModel):
+    env_name: str
+    seed: int = 42
+
+class StepData(BaseModel):
+    action: int
+
 class ResponseData(BaseModel):
     output: list
-
-class ConvertData(BaseModel):
-    data: list
-    width: int
-    height: int
 
 def rgb_to_rgba(rgb_array: NDArray):
     # Convert RGB to RGBA
@@ -46,32 +47,35 @@ def rgb_to_rgba(rgb_array: NDArray):
     rgba_array = rgba_array.reshape(-1)
     return rgba_array
 
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
-
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: str | None = None):
-    return {"item_id": item_id, "q": q}
-
-@app.post("/api")
-def read_rust_send(data: InputData): # TODO: fastapiの非同期通信とrustの並列化，websocketを使って高速化
-    output = env.render()
-    output = np.array(output, dtype=np.uint8)
-    output = output.tolist()
-    start_time = time.time()
-    response = requests.post(f"{rust_host}/convert", json={"data": output})
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    print(f"Time taken for Rust request: {elapsed_time:.2f} seconds")
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Failed to forward request to actix-web server")
+@app.post("/init")
+async def init_env(init_data: InitData):
+    global env
+    try:
+        env = gymnasium.make(init_data.env_name, render_mode="rgb_array")
+        observation, info = env.reset(seed=init_data.seed)
+        return {"message": "Environment is created."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Environment creation failed.")
     
-    convert_data = response.json()
-    return ConvertData(**convert_data)
+@app.post("/step")
+async def step(step_data: StepData):
+    if env is None:
+        raise HTTPException(status_code=400, detail="Environment is not created.")
+    
+    try:
+        observation, reward, terminated, truncated, info = env.step(step_data.action)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Step failed.")
+    done = terminated or truncated
+    if done:
+        observation, info = env.reset()
+        
+    return {"done": done}
 
 @app.post("/render")
-async def post_rgba(data: InputData):
+async def render(data: InputData):
+    if env is None:
+        raise HTTPException(status_code=400, detail="Environment is not created.")
     rgb = env.render()
     rgb = np.array(rgb, dtype=np.uint8)
     width = rgb.shape[1]
