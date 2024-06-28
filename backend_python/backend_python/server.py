@@ -27,12 +27,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class InputData(BaseModel):
-    input: int
-
 class InitData(BaseModel):
     env_name: str
-    seed: int = 42
+    seed: int
 
 class StepData(BaseModel):
     action: int
@@ -72,8 +69,8 @@ async def step(step_data: StepData):
         
     return {"done": done}
 
-@app.post("/render")
-async def render(data: InputData):
+@app.get("/render")
+async def render():
     if env is None:
         raise HTTPException(status_code=400, detail="Environment is not created.")
     rgb = env.render()
