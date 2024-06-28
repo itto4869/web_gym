@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use web_sys::{HtmlElement, HtmlInputElement, HtmlCanvasElement,CanvasRenderingContext2d, console};
+use web_sys::{HtmlElement, HtmlInputElement, HtmlCanvasElement, HtmlSelectElement, CanvasRenderingContext2d, console};
 use reqwest::Client;
 use serde::{Serialize, Deserialize};
 use wasm_bindgen_futures::spawn_local;
@@ -10,47 +10,39 @@ use rmp_serde::decode::from_slice;
 use js_sys;
 
 #[derive(Serialize)]
-struct InputData {
-    input: i32,
-}
-
-#[derive(Deserialize, Serialize)]
-struct ResponseData {
-    output: Vec<Vec<Vec<u8>>>,
+struct InitData {
+    env_name: String,
+    seed: i32,
 }
 
 #[derive(Deserialize)]
-struct ConvertData {
+struct RenderData {
     data: Vec<u8>,
     width: usize,
     height: usize,
 }
 
-async fn send_post_request(input_value: i32, ctx: CanvasRenderingContext2d) -> Result<(), reqwest::Error> {
-    const PYTHON_HOST: &str = "http://127.0.0.1:8000";
-    const width: u32 = 600;
-    const height: u32 = 400;
+const PYTHON_HOST: &str = "http://127.0.0.1:8000";
 
+async fn render(ctx: CanvasRenderingContext2d) -> Result<(), reqwest::Error> {
     ctx.clear_rect(0.0, 0.0, 600.0, 400.0);
 
     let client = Client::new();
-    let input_data = InputData { input: input_value };
 
     let window = web_sys::window().unwrap();
     let performance = window.performance().unwrap();
     let start = performance.now();
 
-    let response = client.post(&format!("{}/render", PYTHON_HOST))
-        .json(&input_data)
+    let response = client.get(&format!("{}/render", PYTHON_HOST))
         .send()
         .await?;
 
     if !response.status().is_success() {
-        web_sys::console::log_1(&JsValue::from_str(&format!("Failed to send POST request: {}", response.status())));
+        web_sys::console::log_1(&JsValue::from_str(&format!("Failed to send render POST request: {}", response.status())));
         return Err(reqwest::Error::from(response.error_for_status().unwrap_err()));
     }
 
-    let elapsed_request = performance.now() - start;
+    let data = response.json::<RenderData>().await?;
 
     let data = response.bytes().await?;
     let elapsed_convert_bytes = performance.now() - start - elapsed_request;
@@ -66,6 +58,26 @@ async fn send_post_request(input_value: i32, ctx: CanvasRenderingContext2d) -> R
     Ok(())
 }
 
+async fn init_env(env_name: String) -> Result<(), reqwest::Error> {
+    let init_data = InitData { 
+            env_name: env_name,
+            seed: 42
+        };
+
+    let client = Client::new();
+    let response = client.post(&format!("{}/init", PYTHON_HOST))
+        .json(&init_data)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        web_sys::console::log_1(&JsValue::from_str(&format!("Failed to send init_env POST request: {}", response.status())));
+        return Err(reqwest::Error::from(response.error_for_status().unwrap_err()));
+    }
+
+    Ok(())
+}
+
 // This is like the `main` function, except for JavaScript.
 #[wasm_bindgen(start)]
 pub fn main_js() -> Result<(), JsValue> {
@@ -73,36 +85,29 @@ pub fn main_js() -> Result<(), JsValue> {
 
     let window = web_sys::window().unwrap();
     let document = window.document().unwrap();
-    let input = document.get_element_by_id("input").unwrap().dyn_into::<HtmlInputElement>().unwrap();
-    let output = document.get_element_by_id("output").unwrap().dyn_into::<HtmlElement>().unwrap();
+    
     let canvas = document.get_element_by_id("canvas").unwrap().dyn_into::<HtmlCanvasElement>().unwrap();
     let ctx = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
+    let select = document.get_element_by_id("init_env").unwrap().dyn_into::<HtmlSelectElement>().unwrap();
+    let start_button = document.get_element_by_id("start").unwrap().dyn_into::<HtmlElement>().unwrap();
 
-    let input_clone = input.clone();
-    let output_clone = output.clone();
     let ctx_clone = ctx.clone();
+    let select_clone = select.clone();
 
     let closure = Closure::wrap(Box::new(move || {
-        let input_value = input_clone.value().parse::<i32>();
-        match input_value {
-            Ok(value) => {
-                //let input_value_clone = input_value.clone();
-                //let output_clone = output_clone.clone();
-                let ctx_clone = ctx_clone.clone();
-                spawn_local(async move {
-                    if let Err(err) = send_post_request(value, ctx_clone).await {
-                        web_sys::console::log_1(&JsValue::from_str(&format!("Error: {:?}", err)));
-                    }
-                });
+        let env_name = select_clone.value();
+        let ctx_clone = ctx_clone.clone();
+        spawn_local(async move {
+            if let Err(err) = init_env(env_name).await {
+                web_sys::console::log_1(&JsValue::from_str(&format!("Error: {:?}", err)));
             }
-            Err(_) => {
-                output_clone.set_inner_text("Please enter a valid number.");
+            if let Err(err) = render(ctx_clone).await {
+                web_sys::console::log_1(&JsValue::from_str(&format!("Error: {:?}", err)));
             }
-        }
+        });
     }) as Box<dyn Fn()>);
 
-    let button = document.get_element_by_id("button").unwrap().dyn_into::<HtmlElement>().unwrap();
-    button.set_onclick(Some(closure.as_ref().unchecked_ref()));
+    start_button.set_onclick(Some(closure.as_ref().unchecked_ref()));
     closure.forget();
     Ok(())
 }
