@@ -23,6 +23,8 @@ struct RenderData {
 }
 
 const PYTHON_HOST: &str = "http://127.0.0.1:8000";
+const WIDTH: u32 = 600;
+const HEIGHT: u32 = 400;
 
 async fn render(ctx: CanvasRenderingContext2d) -> Result<(), reqwest::Error> {
     ctx.clear_rect(0.0, 0.0, 600.0, 400.0);
@@ -42,19 +44,12 @@ async fn render(ctx: CanvasRenderingContext2d) -> Result<(), reqwest::Error> {
         return Err(reqwest::Error::from(response.error_for_status().unwrap_err()));
     }
 
-    let data = response.json::<RenderData>().await?;
-
     let data = response.bytes().await?;
-    let elapsed_convert_bytes = performance.now() - start - elapsed_request;
 
-    let elapsed_convert = performance.now() - start - elapsed_request - elapsed_convert_bytes;
-
-    let image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&data), width, height).unwrap();
+    let image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&data), WIDTH, HEIGHT).unwrap();
     ctx.put_image_data(&image_data, 0.0, 0.0).unwrap();
-    let elapsed_draw = performance.now() - start - elapsed_request - elapsed_convert;
     let elapsed_total = performance.now() - start;
-    web_sys::console::log_1(&JsValue::from_str(&format!("Request: {:?}, Convert b: {:?}, Convert: {:?}, Draw: {:?}, Total: {:?}",
-        elapsed_request, elapsed_convert_bytes, elapsed_convert, elapsed_draw, elapsed_total)));
+    web_sys::console::log_1(&JsValue::from_str(&format!("Total: {:?}", elapsed_total)));
     Ok(())
 }
 
