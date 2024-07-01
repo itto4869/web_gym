@@ -15,6 +15,11 @@ struct InitData {
     seed: i32,
 }
 
+#[derive(Serialize)]
+struct StepData {
+    action: i32,
+}
+
 #[derive(Deserialize)]
 struct RenderData {
     data: Vec<u8>,
@@ -73,6 +78,24 @@ async fn init_env(env_name: String) -> Result<(), reqwest::Error> {
     Ok(())
 }
 
+async fn step(action: i32) -> Result<(), reqwest::Error> {
+    let step_data = StepData { action: action };
+
+    let client = Client::new();
+
+    let response = client.post(&format!("{}/step", PYTHON_HOST))
+        .json(&step_data)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        web_sys::console::log_1(&JsValue::from_str(&format!("Failed to send step POST request: {}", response.status())));
+        return Err(reqwest::Error::from(response.error_for_status().unwrap_err()));
+    }
+
+    Ok(())
+}
+
 // This is like the `main` function, except for JavaScript.
 #[wasm_bindgen(start)]
 pub fn main_js() -> Result<(), JsValue> {
@@ -85,6 +108,7 @@ pub fn main_js() -> Result<(), JsValue> {
     let ctx = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
     let select = document.get_element_by_id("init_env").unwrap().dyn_into::<HtmlSelectElement>().unwrap();
     let start_button = document.get_element_by_id("start").unwrap().dyn_into::<HtmlElement>().unwrap();
+    let action_button = document.get_element_by_id("action").unwrap().dyn_into::<HtmlElement>().unwrap();
 
     let ctx_clone = ctx.clone();
     let select_clone = select.clone();
@@ -102,8 +126,23 @@ pub fn main_js() -> Result<(), JsValue> {
         });
     }) as Box<dyn Fn()>);
 
+    let action_closure = Closure::wrap(Box::new(move || {
+        let action = 1;
+        let ctx_clone = ctx.clone();
+        spawn_local(async move {
+            if let Err(err) = step(action).await {
+                web_sys::console::log_1(&JsValue::from_str(&format!("Error: {:?}", err)));
+            }
+            if let Err(err) = render(ctx_clone).await {
+                web_sys::console::log_1(&JsValue::from_str(&format!("Error: {:?}", err)));
+            }
+        });
+    }) as Box<dyn Fn()>);
+
     start_button.set_onclick(Some(closure.as_ref().unchecked_ref()));
+    action_button.set_onclick(Some(action_closure.as_ref().unchecked_ref()));
     closure.forget();
+    action_closure.forget();
     Ok(())
 }
 
